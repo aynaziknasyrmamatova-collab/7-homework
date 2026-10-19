@@ -1,3 +1,4 @@
+from collections import defaultdict
 from django.core.cache import cache
 from django.shortcuts import get_object_or_404
 from rest_framework import status, permissions
@@ -38,6 +39,18 @@ class TaskView(APIView):
         cache.delete("tasks")
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class GroupedTaskView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        grouped_tasks = defaultdict(list)
+        tasks = Task.objects.all().order_by("deadline")
+        for task in tasks:
+            date_key = task.deadline.date().isoformat() if task.deadline else "Без дедлайна"
+            grouped_tasks[date_key].append(TaskSerializer(task).data)
+        return Response(dict(grouped_tasks))
 
 
 class TaskDetailView(APIView):

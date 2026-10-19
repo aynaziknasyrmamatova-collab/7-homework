@@ -1,5 +1,7 @@
 from django.test import TestCase
 from django.core.cache import cache
+from django.utils import timezone
+from datetime import timedelta
 from rest_framework.test import APIClient
 from rest_framework import status
 
@@ -39,3 +41,43 @@ class SimpleTaskCachingTests(TestCase):
         # 6. Следующий GET вернет уже все 3 актуальные записи
         res3 = self.client.get("/task/")
         self.assertEqual(len(res3.data), 3)
+
+    def test_update_invalidates_cached_tasks(self):
+        self.client.get("/task/")
+
+        response = self.client.put(
+            f"/task/{self.task.id}/",
+            {"title": "Купить муку", "description": "1 кг", "is_completed": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(cache.get("tasks"))
+
+    def test_deadline_text_and_grouped_endpoint(self):
+        deadline = timezone.now() + timedelta(days=2, hours=1)
+        task = Task.objects.create(title="Подготовиться", deadline=deadline)
+
+        list_response = self.client.get("/task/")
+        task_data = next(item for item in list_response.data if item["id"] == task.id)
+        self.assertTrue(task_data["time_left"].startswith("2 days left"))
+
+        grouped_response = self.client.get("/task/grouped/")
+        self.assertEqual(grouped_response.status_code, status.HTTP_200_OK)
+        self.assertIn(deadline.date().isoformat(), grouped_response.data)
+        self.assertEqual(grouped_response.data[deadline.date().isoformat()][0]["id"], task.id)
+
+    def test_missing_and_expired_deadline_messages(self):
+        expired = Task.objects.create(
+            title="Старый дедлайн",
+            deadline=timezone.now() - timedelta(days=1),
+        )
+
+        self.assertEqual(
+            self.client.get(f"/task/{self.task.id}/").data["time_left"],
+            "Дедлайн не указан",
+        )
+        self.assertEqual(
+            self.client.get(f"/task/{expired.id}/").data["time_left"],
+            "Дедлайн просрочен",
+        )
