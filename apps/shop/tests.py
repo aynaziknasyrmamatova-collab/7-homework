@@ -1,4 +1,5 @@
 from django.test import TestCase
+from django.contrib.auth.models import User
 from rest_framework.test import APIClient
 
 from .models import Category, Product, Shop
@@ -7,6 +8,12 @@ from .models import Category, Product, Shop
 class ProductApiTests(TestCase):
 	def setUp(self):
 		self.client = APIClient()
+		self.admin = User.objects.create_user(
+			username="shop-admin",
+			password="test-password",
+			is_staff=True,
+		)
+		self.client.force_authenticate(user=self.admin)
 		self.shop = Shop.objects.create(name="Market", color="green")
 		self.category = Category.objects.create(name="Books")
 
@@ -36,3 +43,18 @@ class ProductApiTests(TestCase):
 
 		self.assertEqual(response.status_code, 200)
 		self.assertEqual(response.data["results"][0]["name"], "Books")
+
+	def test_product_creation_requires_staff(self):
+		anonymous_client = APIClient()
+		response = anonymous_client.post(
+			"/shop/products/",
+			{
+				"shop": self.shop.id,
+				"category": self.category.id,
+				"title": "Novel",
+				"price": "15.00",
+				"stock": 3,
+			},
+			format="json",
+		)
+		self.assertEqual(response.status_code, 401)

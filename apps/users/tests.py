@@ -60,6 +60,67 @@ class UserAuthenticationTests(TestCase):
         response = self.client.post(self.login_url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['user']['username'], 'existinguser')
+        self.assertTrue(response.data['token'])
+        self.assertTrue(response.data['access'])
+        self.assertTrue(response.data['refresh'])
+
+    def test_login_tokens_authenticate_with_django_token_and_jwt(self):
+        login_response = self.client.post(
+            self.login_url,
+            {
+                'username': 'existinguser',
+                'password': self.user_password,
+            },
+            format='json',
+        )
+
+        token_client = APIClient()
+        token_client.credentials(
+            HTTP_AUTHORIZATION=f"Token {login_response.data['token']}"
+        )
+        self.assertEqual(
+            token_client.get(self.profile_url).status_code,
+            status.HTTP_200_OK,
+        )
+
+        jwt_client = APIClient()
+        jwt_client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {login_response.data['access']}"
+        )
+        self.assertEqual(
+            jwt_client.get(self.profile_url).status_code,
+            status.HTTP_200_OK,
+        )
+
+    def test_standalone_token_endpoints(self):
+        credentials = {
+            'username': 'existinguser',
+            'password': self.user_password,
+        }
+        django_token_response = self.client.post(
+            '/api/auth/token/',
+            credentials,
+            format='json',
+        )
+        self.assertEqual(django_token_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(django_token_response.data['token'])
+
+        jwt_response = self.client.post(
+            '/api/auth/jwt/create/',
+            credentials,
+            format='json',
+        )
+        self.assertEqual(jwt_response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', jwt_response.data)
+        self.assertIn('refresh', jwt_response.data)
+
+        refresh_response = self.client.post(
+            '/api/auth/jwt/refresh/',
+            {'refresh': jwt_response.data['refresh']},
+            format='json',
+        )
+        self.assertEqual(refresh_response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', refresh_response.data)
 
     def test_login_invalid_credentials(self):
         data = {
@@ -86,7 +147,32 @@ class UserAuthenticationTests(TestCase):
         self.assertEqual(self.user.email, 'updated@example.com')
 
     def test_logout(self):
-        self.client.force_authenticate(user=self.user)
-        response = self.client.post(self.logout_url)
+        login_response = self.client.post(
+            self.login_url,
+            {
+                'username': 'existinguser',
+                'password': self.user_password,
+            },
+            format='json',
+        )
+        token_client = APIClient()
+        token_client.credentials(
+            HTTP_AUTHORIZATION=f"Token {login_response.data['token']}"
+        )
+        response = token_client.post(
+            self.logout_url,
+            {'refresh': login_response.data['refresh']},
+            format='json',
+        )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-
+        self.assertEqual(
+            token_client.get(self.profile_url).status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+        token_client.credentials()
+        refresh_response = token_client.post(
+            '/api/auth/jwt/refresh/',
+            {'refresh': login_response.data['refresh']},
+            format='json',
+        )
+        self.assertEqual(refresh_response.status_code, status.HTTP_401_UNAUTHORIZED)

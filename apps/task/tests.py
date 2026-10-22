@@ -1,4 +1,5 @@
 from django.test import TestCase
+from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.utils import timezone
 from datetime import timedelta
@@ -11,6 +12,10 @@ from .models import Task
 class SimpleTaskCachingTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.user = User.objects.create_user(
+            username="task-user",
+            password="test-password",
+        )
         cache.clear()
         self.task = Task.objects.create(
             title="Купить хлеб",
@@ -34,6 +39,7 @@ class SimpleTaskCachingTests(TestCase):
         self.assertEqual(len(res2.data), 1)
 
         # 5. Делаем POST через API — кэш должен очиститься
+        self.client.force_authenticate(user=self.user)
         post_res = self.client.post("/task/", {"title": "Купить масло", "description": "Пачка"}, format="json")
         self.assertEqual(post_res.status_code, status.HTTP_201_CREATED)
         self.assertIsNone(cache.get("tasks"))
@@ -44,6 +50,7 @@ class SimpleTaskCachingTests(TestCase):
 
     def test_update_invalidates_cached_tasks(self):
         self.client.get("/task/")
+        self.client.force_authenticate(user=self.user)
 
         response = self.client.put(
             f"/task/{self.task.id}/",
@@ -53,6 +60,25 @@ class SimpleTaskCachingTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIsNone(cache.get("tasks"))
+
+    def test_task_creation_requires_authentication_but_listing_is_public(self):
+        listing = self.client.get("/task/")
+        self.assertEqual(listing.status_code, status.HTTP_200_OK)
+
+        response = self.client.post(
+            "/task/",
+            {"title": "Новая задача"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        self.client.force_authenticate(user=self.user)
+        authenticated_response = self.client.post(
+            "/task/",
+            {"title": "Новая задача"},
+            format="json",
+        )
+        self.assertEqual(authenticated_response.status_code, status.HTTP_201_CREATED)
 
     def test_deadline_text_and_grouped_endpoint(self):
         deadline = timezone.now() + timedelta(days=2, hours=1)

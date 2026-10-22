@@ -16,6 +16,16 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from drf_spectacular.views import (
+    SpectacularAPIView,
+    SpectacularSwaggerView,
+    SpectacularRedocView,
+)
+from apps.users.views import (
+    DjangoTokenObtainView,
+    JWTTokenObtainPairView,
+    JWTTokenRefreshView,
+)
 
 
 urlpatterns = [
@@ -24,6 +34,19 @@ urlpatterns = [
     path('task/', include("apps.task.urls")),
     path('books/', include("apps.books.urls")),
     path('shop/', include("apps.shop.urls")), ###
-    path('users/', include("apps.users.urls")) 
+    path('users/', include("apps.users.urls")),
+    path('api/auth/token/', DjangoTokenObtainView.as_view(), name='api-token-auth'),
+    path('api/auth/jwt/create/', JWTTokenObtainPairView.as_view(), name='jwt-create'),
+    path('api/auth/jwt/refresh/', JWTTokenRefreshView.as_view(), name='jwt-refresh'),
+    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
+    path(
+        'api/docs/',
+        SpectacularSwaggerView.as_view(url_name='schema'),
+        name='swagger-ui',
+    ),
+    path(
+        'api/redoc/',
+        SpectacularRedocView.as_view(url_name='schema'),
+        name='redoc',
+    ),
 ]
-
